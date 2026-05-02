@@ -1,6 +1,6 @@
-streamlit==1.39.0
-transformers==4.44.2
-torch==2.4.1
-Pillow==10.4.0
-sentencepiece==0.2.0
+streamlit
+transformers>=4.40,<4.50
+torch
+Pillow
+sentencepiece
 numpy<2
