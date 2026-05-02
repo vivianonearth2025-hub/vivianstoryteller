@@ -1,4 +1,5 @@
 streamlit
-transformers<5.0.0
-Pillow
+transformers
 torch
+Pillow
+sentencepiece
