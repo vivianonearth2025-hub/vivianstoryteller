@@ -1,5 +1,5 @@
 streamlit
-transformers>=4.40,<4.50
+transformers>=4.40,<4.46
 torch
 Pillow
 sentencepiece
