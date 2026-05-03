@@ -22,8 +22,12 @@ def load_image_to_text_model():
 
 @st.cache_resource
 def load_story_generator_model():
-    """Load the story generation model (cached)."""
-    return pipeline("text-generation", model="pranavpsv/genre-story-generator-v2")
+    """Load the story generation model (cached).
+    Using GPT-2 because it follows the prompt more faithfully than
+    specialized story models, which often ignore the input and recite
+    memorized story fragments from their training data.
+    """
+    return pipeline("text-generation", model="gpt2")
 
 
 @st.cache_resource
@@ -81,12 +85,13 @@ def text2story(text):
     Returns:
         str: A kid-friendly story.
     """
-    # Build a fairy-tale style prompt. Starting with "Once upon a time" tells
-    # the model "this is a children's bedtime story", which works much better
-    # than a meta-instruction like "Write a story for kids".
+    # Build a prompt that anchors GPT-2 firmly to the image content.
+    # Strategy: state the topic, then START the story so GPT-2 just continues it.
+    # This works much better than asking GPT-2 to "write a story" -- it is a
+    # text continuation model, so we feed it the opening of the story.
     prompt = (
-        f"Once upon a time, in a happy and magical world, there was "
-        f"{text}. This is a sweet bedtime story for little children. "
+        f"Here is a happy and gentle children's story about {text}.\n\n"
+        f"Once upon a sunny day, {text}. They were having so much fun together. "
     )
 
     # Load the cached story generator
@@ -136,13 +141,15 @@ def text2story(text):
         story_text = candidate  # keep the latest in case all attempts fail
 
     # Final safety net: if after 3 tries the story is still not clean,
-    # prepend a friendly opener so it at least feels like a children's story
+    # fall back to a fixed safe story template
     if not is_kid_friendly(story_text):
         story_text = (
-            f"Once upon a time, there was {text}. They had a wonderful "
-            f"sunny day full of laughter, friends, and fun adventures. "
-            f"Everyone smiled and played happily together until it was "
-            f"time to go home. The end."
+            f"Once upon a sunny day, {text}. They were having so much fun "
+            f"together. The sky was bright blue and the birds were singing "
+            f"sweet songs. Everyone laughed and played all afternoon, sharing "
+            f"snacks and telling silly jokes. When the sun started to set, "
+            f"they all walked home with happy hearts, looking forward to "
+            f"another wonderful day tomorrow. The end."
         )
 
     return story_text
