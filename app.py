@@ -54,12 +54,25 @@ def img2text(url):
 # Words that are not appropriate for a 3-10 year old audience.
 # If the generated story contains any of these, we will regenerate it.
 UNSAFE_WORDS = [
+    # Violence
     "kill", "killed", "killing", "murder", "murdered", "death", "die", "died",
-    "dying", "blood", "bloody", "gun", "shoot", "shot", "weapon", "knife",
-    "stab", "beat", "beaten", "beating", "rape", "raped", "abuse", "abused",
-    "drug", "drugs", "drunk", "alcohol", "sex", "sexual", "naked", "nude",
-    "hell", "damn", "hate", "hated", "suicide", "asylum", "prison", "jail",
-    "police", "cheated", "cheat", "steal", "stolen",
+    "dying", "dead", "blood", "bloody", "gun", "shoot", "shot", "weapon",
+    "knife", "stab", "beat", "beaten", "beating", "fight", "fought", "war",
+    "attack", "attacked", "hit", "hurt", "hurts",
+    # Adult content
+    "rape", "raped", "abuse", "abused", "sex", "sexual", "naked", "nude",
+    "marriage", "married", "wife", "husband", "boyfriend", "girlfriend",
+    "kiss", "kissed", "love", "lover",
+    # Substances
+    "drug", "drugs", "drunk", "alcohol", "beer", "wine", "smoke", "cigarette",
+    # Crime / scary
+    "suicide", "asylum", "prison", "jail", "police", "cheated", "cheat",
+    "steal", "stolen", "stealing", "rob", "robbed", "scary", "scared",
+    "monster", "demon", "devil", "ghost",
+    # Negative emotions
+    "hate", "hated", "angry", "sad", "cry", "cried", "crying", "lonely",
+    # Profanity
+    "hell", "damn",
 ]
 
 
@@ -69,10 +82,28 @@ def is_kid_friendly(story):
     for word in UNSAFE_WORDS:
         # Use spaces to match whole words only (avoid false positives like
         # "diet" matching "die")
-        if f" {word} " in f" {story_lower} " or f" {word}." in story_lower \
-                or f" {word}," in story_lower:
+        if (f" {word} " in f" {story_lower} "
+                or f" {word}." in story_lower
+                or f" {word}," in story_lower
+                or f" {word}!" in story_lower
+                or f" {word}?" in story_lower):
             return False
+    # Reject if too short
+    if len(story.split()) < 30:
+        return False
     return True
+
+
+def clean_story(text):
+    """Clean up messy characters that GPT-2 sometimes produces at the start."""
+        while text and not text[0].isalpha():
+        text = text[1:]
+        bad_starts = ["i'm ", "i am ", "i ", "you ", "we ", "they "]
+    text_lower = text.lower()
+    for bs in bad_starts:
+        if text_lower.startswith(bs):
+            return ""  # signal to regenerate
+    return text.strip()
 
 
 def text2story(text):
@@ -87,8 +118,6 @@ def text2story(text):
     """
     # Build a prompt that anchors GPT-2 firmly to the image content.
     # Strategy: state the topic, then START the story so GPT-2 just continues it.
-    # This works much better than asking GPT-2 to "write a story" -- it is a
-    # text continuation model, so we feed it the opening of the story.
     prompt = (
         f"Here is a happy and gentle children's story about {text}.\n\n"
         f"Once upon a sunny day, {text}. They were having so much fun together. "
@@ -97,9 +126,9 @@ def text2story(text):
     # Load the cached story generator
     story_pipe = load_story_generator_model()
 
-    # Try up to 3 times to get a kid-friendly story
+    # Try up to 5 times to get a kid-friendly, well-formed story
     story_text = ""
-    for attempt in range(3):
+    for attempt in range(5):
         # Generate with controlled length and safer sampling parameters.
         # Lower temperature => more focused, less random output.
         # repetition_penalty => avoid the model repeating the same phrases.
@@ -118,6 +147,11 @@ def text2story(text):
 
         # Strip the prompt from the output so only the story remains
         candidate = full_output.replace(prompt, "").strip()
+
+        # Clean up messy openings (~~~, "I'm talking to...", etc.)
+        candidate = clean_story(candidate)
+        if not candidate:
+            continue  # try again
 
         # Trim to <=100 words while keeping the last sentence complete
         words = candidate.split()
@@ -140,9 +174,9 @@ def text2story(text):
             break
         story_text = candidate  # keep the latest in case all attempts fail
 
-    # Final safety net: if after 3 tries the story is still not clean,
-    # fall back to a fixed safe story template
-    if not is_kid_friendly(story_text):
+    # Final safety net: if after 5 tries the story is still not clean,
+    # fall back to a fixed safe story template based on the caption
+    if not story_text or not is_kid_friendly(story_text):
         story_text = (
             f"Once upon a sunny day, {text}. They were having so much fun "
             f"together. The sky was bright blue and the birds were singing "
@@ -204,16 +238,43 @@ def main():
         # Show the uploaded image
         st.image(uploaded_file, caption="Your Picture 🖼️", use_column_width=True)
 
-        # ---- Stage 1: Image to Text ----
-        with st.spinner("Looking at your picture... 👀"):
-            scenario = img2text(uploaded_file.name)
+        # Use the file name as a key so the story regenerates only when the
+        # user uploads a new image (not on every button click)
+        file_key = uploaded_file.name
+
+        # If this is a new image OR we haven't generated yet, run the pipeline.
+        # Otherwise, reuse the cached results from session_state.
+        if st.session_state.get("file_key") != file_key:
+            # ---- Stage 1: Image to Text ----
+            with st.spinner("Looking at your picture... 👀"):
+                scenario = img2text(file_key)
+
+            # ---- Stage 2: Text to Story ----
+            with st.spinner("Writing your story... ✏️"):
+                story = text2story(scenario)
+
+            # ---- Stage 3: Text to Audio ----
+            with st.spinner("Getting ready to read it out loud... 🎤"):
+                audio_data = text2audio(story)
+
+            # Save everything to session_state so we don't regenerate on
+            # every interaction (like clicking the Play button)
+            st.session_state["file_key"] = file_key
+            st.session_state["scenario"] = scenario
+            st.session_state["story"] = story
+            st.session_state["audio_data"] = audio_data
+
+        # Read the (possibly cached) results from session_state
+        scenario = st.session_state["scenario"]
+        story = st.session_state["story"]
+        audio_data = st.session_state["audio_data"]
+
+        # ---- Display: Caption ----
         st.success("I can see what's in your picture! 🎉")
         with st.expander("🔍 What I see in the picture"):
             st.write(scenario)
 
-        # ---- Stage 2: Text to Story ----
-        with st.spinner("Writing your story... ✏️"):
-            story = text2story(scenario)
+        # ---- Display: Story ----
         st.success("Your story is ready! 📖")
         st.markdown("### 📖 Your Magical Story")
         st.markdown(
@@ -224,11 +285,7 @@ def main():
         )
         st.write("")  # spacer
 
-        # ---- Stage 3: Text to Audio ----
-        with st.spinner("Getting ready to read it out loud... 🎤"):
-            audio_data = text2audio(story)
-
-        # ---- Audio playback ----
+        # ---- Display: Audio playback ----
         st.markdown("### 🔊 Listen to Your Story!")
         if st.button("▶️ Play My Story!"):
             audio_array = audio_data["audio"]
