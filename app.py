@@ -15,7 +15,7 @@ def load_image_to_text_model():
 
 @st.cache_resource
 def load_story_generator_model():
-    return pipeline("text-generation", model="gpt2")
+    return pipeline("text-generation", model="roneneldan/TinyStories-33M")
 
 
 @st.cache_resource
@@ -66,8 +66,8 @@ def clean_story(text):
     if not text:
         return ""
 
-    # Remove leading symbols
-    while text and not text[0].isalpha():
+    # Remove leading symbols and non-ASCII characters
+    while text and (not text[0].isalpha() or ord(text[0]) > 127):
         text = text[1:]
 
     if not text:
@@ -85,10 +85,7 @@ def clean_story(text):
 # text2story
 def text2story(text):
     # Prompt for the story
-    prompt = (
-        f"Here is a happy and gentle children's story about {text}.\n\n"
-        f"Once upon a sunny day, {text}. They were having so much fun together. "
-    )
+    prompt = f"Once upon a time, {text}. "
 
     story_pipe = load_story_generator_model()
 
@@ -99,16 +96,14 @@ def text2story(text):
             max_new_tokens=140,
             min_new_tokens=70,
             do_sample=True,
-            temperature=0.7,
+            temperature=0.8,
             top_p=0.9,
             repetition_penalty=1.2,
             truncation=True,
-            pad_token_id=50256,
         )
         full_output = story_results[0]["generated_text"]
 
-        # Remove the prompt from the result
-        candidate = full_output.replace(prompt, "").strip()
+        candidate = full_output.strip()
 
         candidate = clean_story(candidate)
         if not candidate:
