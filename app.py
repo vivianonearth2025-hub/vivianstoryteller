@@ -96,7 +96,7 @@ def is_kid_friendly(story):
 
 def clean_story(text):
     """Clean up messy characters that GPT-2 sometimes produces at the start."""
-        while text and not text[0].isalpha():
+    while text and not text[0].isalpha():
         text = text[1:]
         bad_starts = ["i'm ", "i am ", "i ", "you ", "we ", "they "]
     text_lower = text.lower()
