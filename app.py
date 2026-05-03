@@ -47,52 +47,103 @@ def img2text(url):
 
 
 # ---------- Function 2: Text to Story ----------
+# Words that are not appropriate for a 3-10 year old audience.
+# If the generated story contains any of these, we will regenerate it.
+UNSAFE_WORDS = [
+    "kill", "killed", "killing", "murder", "murdered", "death", "die", "died",
+    "dying", "blood", "bloody", "gun", "shoot", "shot", "weapon", "knife",
+    "stab", "beat", "beaten", "beating", "rape", "raped", "abuse", "abused",
+    "drug", "drugs", "drunk", "alcohol", "sex", "sexual", "naked", "nude",
+    "hell", "damn", "hate", "hated", "suicide", "asylum", "prison", "jail",
+    "police", "cheated", "cheat", "steal", "stolen",
+]
+
+
+def is_kid_friendly(story):
+    """Check if the story is appropriate for 3-10 year old kids."""
+    story_lower = story.lower()
+    for word in UNSAFE_WORDS:
+        # Use spaces to match whole words only (avoid false positives like
+        # "diet" matching "die")
+        if f" {word} " in f" {story_lower} " or f" {word}." in story_lower \
+                or f" {word}," in story_lower:
+            return False
+    return True
+
+
 def text2story(text):
     """
     Stage 2: Turn the image caption into a kid-friendly story (50-100 words).
-    A prompt is added to guide the model toward a children's story style.
+    A storytelling-style prompt is used to guide the model into a fairy-tale
+    voice, and the result is filtered to make sure it is appropriate for kids.
     Args:
         text (str): The caption from img2text().
     Returns:
         str: A kid-friendly story.
     """
-    # Build a prompt to guide the model toward a children's story
-    prompt = text + ". Write a story for 3-10 year old kids."
+    # Build a fairy-tale style prompt. Starting with "Once upon a time" tells
+    # the model "this is a children's bedtime story", which works much better
+    # than a meta-instruction like "Write a story for kids".
+    prompt = (
+        f"Once upon a time, in a happy and magical world, there was "
+        f"{text}. This is a sweet bedtime story for little children. "
+    )
 
     # Load the cached story generator
     story_pipe = load_story_generator_model()
 
-    # Generate the story with controlled length
-    # max_new_tokens=150 roughly maps to ~100-110 English words
-    # min_new_tokens=70 prevents stories that are too short
-    story_results = story_pipe(
-        prompt,
-        max_new_tokens=150,
-        min_new_tokens=70,
-        do_sample=True,
-        temperature=0.8,
-        truncation=True,
-    )
-    full_output = story_results[0]["generated_text"]
-
-    # Remove the prompt from the output so only the story remains
-    story_text = full_output.replace(prompt, "").strip()
-
-    # Trim to <=100 words while keeping the last sentence complete
-    words = story_text.split()
-    if len(words) > 100:
-        truncated = " ".join(words[:100])
-        # Find the last sentence-ending punctuation in the truncated text
-        last_end = max(
-            truncated.rfind("."),
-            truncated.rfind("!"),
-            truncated.rfind("?"),
+    # Try up to 3 times to get a kid-friendly story
+    story_text = ""
+    for attempt in range(3):
+        # Generate with controlled length and safer sampling parameters.
+        # Lower temperature => more focused, less random output.
+        # repetition_penalty => avoid the model repeating the same phrases.
+        story_results = story_pipe(
+            prompt,
+            max_new_tokens=140,
+            min_new_tokens=70,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.9,
+            repetition_penalty=1.2,
+            truncation=True,
+            pad_token_id=50256,
         )
-        if last_end > 0:
-            story_text = truncated[: last_end + 1]
-        else:
-            # Fallback: keep the truncated text and add a period
-            story_text = truncated + "."
+        full_output = story_results[0]["generated_text"]
+
+        # Strip the prompt from the output so only the story remains
+        candidate = full_output.replace(prompt, "").strip()
+
+        # Trim to <=100 words while keeping the last sentence complete
+        words = candidate.split()
+        if len(words) > 100:
+            truncated = " ".join(words[:100])
+            last_end = max(
+                truncated.rfind("."),
+                truncated.rfind("!"),
+                truncated.rfind("?"),
+            )
+            if last_end > 0:
+                candidate = truncated[: last_end + 1]
+            else:
+                candidate = truncated + "."
+
+        # Check if the candidate is safe for kids; if so, use it.
+        # Otherwise, try again.
+        if is_kid_friendly(candidate):
+            story_text = candidate
+            break
+        story_text = candidate  # keep the latest in case all attempts fail
+
+    # Final safety net: if after 3 tries the story is still not clean,
+    # prepend a friendly opener so it at least feels like a children's story
+    if not is_kid_friendly(story_text):
+        story_text = (
+            f"Once upon a time, there was {text}. They had a wonderful "
+            f"sunny day full of laughter, friends, and fun adventures. "
+            f"Everyone smiled and played happily together until it was "
+            f"time to go home. The end."
+        )
 
     return story_text
 
